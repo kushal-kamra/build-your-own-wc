@@ -15,16 +15,24 @@ func countBytes(reader io.Reader) (int64, error) {
 func countTotalBytes(reader io.Reader) (int64, error) {
 	var total int64
 	emptyReads := 0
+	
+	// Allocate the 32 KiB buffer once here. 
+	// Stays on the stack if it doesn't escape, or is allocated exactly once on the heap.
+	var buffer [32 * 1024]byte
+
 	for {
-		count, err := countBytes(reader)
-		total += count
+		// Read directly into the reusable slice window
+		n, err := reader.Read(buffer[:])
+		total += int64(n)
+		
 		if err == io.EOF {
 			return total, nil
 		}
 		if err != nil {
 			return total, err
 		}
-		if count == 0 {
+
+		if n == 0 {
 			emptyReads++
 			if emptyReads == 100 {
 				return total, io.ErrNoProgress
