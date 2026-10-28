@@ -1,12 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
-	"bufio"
 	"unicode"
-
 )
 
 // Metrics stores the aggregated counts computed during a single pass over a stream.
@@ -71,35 +70,90 @@ func main() {
 }
 
 func run() error {
-	// 1. Declare a single interface variable to hold our input source
-	var reader io.Reader
+	var filename string
+	var countBytes, countLines, countWords, countChars, hasFlags bool
 
-	// 2. Inspect the arguments to determine the source
-	if len(os.Args) > 1 {
-		// Filename supplied: open the file
-		filename := os.Args[1]
+	// =========================================================================
+	// PHASE 1: Parse arguments sequentially
+	// =========================================================================
+	for _, arg := range os.Args[1:] {
+		switch arg {
+		case "-c":
+			countBytes = true
+			hasFlags = true
+		case "-l":
+			countLines = true
+			hasFlags = true
+		case "-w":
+			countWords = true
+			hasFlags = true
+		case "-m":
+			countChars = true
+			hasFlags = true
+		default:
+			// If it starts with a hyphen, it's an unrecognized option
+			if len(arg) > 0 && arg[0] == '-' {
+				return fmt.Errorf("ccwc: invalid option -- '%s'", arg[1:])
+			}
+			// If filename is already populated, the user passed multiple files
+			if filename != "" {
+				return fmt.Errorf("ccwc: extra operand '%s' (only one file at a time is supported)", arg)
+			}
+			filename = arg
+		}
+	}
+
+	// =========================================================================
+	// PHASE 2: Apply default behaviors if no flags were provided
+	// =========================================================================
+	if !hasFlags {
+		countLines = true
+		countWords = true
+		countBytes = true
+	}
+
+	// =========================================================================
+	// PHASE 3: Resolve input source stream (File vs. Stdin)
+	// =========================================================================
+	var reader io.Reader
+	if filename != "" {
 		file, err := os.Open(filename)
 		if err != nil {
 			return err
 		}
-		// Ensure the file is closed when run() exits
 		defer file.Close()
-		
-		// Assign the file to our unified reader
 		reader = file
 	} else {
-		// No filename supplied: fallback to standard input
 		reader = os.Stdin
 	}
 
-	// 3. Execution pipeline (Unified Logic)
-	// Both paths converge here seamlessly without code duplication
+	// =========================================================================
+	// PHASE 4: Compute metrics in a single stream pass
+	// =========================================================================
 	metrics, err := countTotalMetrics(reader)
 	if err != nil {
 		return err
 	}
 
-	_, writeErr := fmt.Println(metrics)
-	return writeErr
-}
+	// =========================================================================
+	// PHASE 5: Print matching results in standard Unix wc layout order
+	// =========================================================================
+	if countLines {
+		fmt.Printf(" %7d", metrics.Lines)
+	}
+	if countWords {
+		fmt.Printf(" %7d", metrics.Words)
+	}
+	if countBytes {
+		fmt.Printf(" %7d", metrics.Bytes)
+	}
+	if countChars {
+		fmt.Printf(" %7d", metrics.Chars)
+	}
+	if filename != "" {
+		fmt.Printf(" %s", filename)
+	}
+	fmt.Println()
 
+	return nil
+}
