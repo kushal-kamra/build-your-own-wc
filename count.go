@@ -4,41 +4,61 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"bufio"
+	"unicode"
+
 )
 
-func countBytes(reader io.Reader) (int64, error) {
-	var buffer [32 * 1024]byte
-	n, err := reader.Read(buffer[:])
-	return int64(n), err
+// Metrics stores the aggregated counts computed during a single pass over a stream.
+type Metrics struct {
+	Lines int64
+	Words int64
+	Bytes int64
+	Chars int64
 }
 
-func countTotalBytes(reader io.Reader) (int64, error) {
-	var total int64
-	emptyReads := 0
+// countTotalMetrics processes the provided reader exactly once using an efficient
+// buffered stream scanner. It dynamically tracks lines, words, bytes, and characters
+// simultaneously without risking multi-byte encoding corruption or unnecessary allocations.
+func countTotalMetrics(reader io.Reader) (Metrics, error) {
+	// Initialize struct fields to zero automatically
+	var metrics Metrics
 	
-	// Allocate the 32 KiB buffer once here. 
-	// Stays on the stack if it doesn't escape, or is allocated exactly once on the heap.
-	var buffer [32 * 1024]byte
+	// Wrap the reader to protect against multi-byte slice splitting on boundaries
+	bufferedReader := bufio.NewReader(reader)
+	
+	// Finite state machine tracker for word boundaries
+	inWord := false
 
 	for {
-		// Read directly into the reusable slice window
-		n, err := reader.Read(buffer[:])
-		total += int64(n)
-		
+		// Decode one full Unicode code point (rune) safely from the stream buffer
+		r, size, err := bufferedReader.ReadRune()
 		if err == io.EOF {
-			return total, nil
+			// Stream ended successfully; return accumulated metrics with a nil error
+			return metrics, nil
 		}
 		if err != nil {
-			return total, err
+			// A genuine system or network failure occurred; return what we have so far
+			return metrics, err
 		}
 
-		if n == 0 {
-			emptyReads++
-			if emptyReads == 100 {
-				return total, io.ErrNoProgress
-			}
+		// 1. Increment characters and exact consumed byte sizes
+		metrics.Chars++
+		metrics.Bytes += int64(size)
+
+		// 2. Count newlines
+		if r == '\n' {
+			metrics.Lines++
+		}
+
+		// 3. Process the word-counting state engine using comprehensive Unicode tracking
+		if unicode.IsSpace(r) {
+			inWord = false
 		} else {
-			emptyReads = 0
+			if !inWord {
+				metrics.Words++
+				inWord = true
+			}
 		}
 	}
 }
@@ -74,12 +94,12 @@ func run() error {
 
 	// 3. Execution pipeline (Unified Logic)
 	// Both paths converge here seamlessly without code duplication
-	count, err := countTotalBytes(reader)
+	metrics, err := countTotalMetrics(reader)
 	if err != nil {
 		return err
 	}
 
-	_, writeErr := fmt.Println(count)
+	_, writeErr := fmt.Println(metrics)
 	return writeErr
 }
 
