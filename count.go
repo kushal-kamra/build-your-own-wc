@@ -51,15 +51,35 @@ func main() {
 }
 
 func run() error {
-	file, err := os.Open("test.txt")
+	// 1. Declare a single interface variable to hold our input source
+	var reader io.Reader
+
+	// 2. Inspect the arguments to determine the source
+	if len(os.Args) > 1 {
+		// Filename supplied: open the file
+		filename := os.Args[1]
+		file, err := os.Open(filename)
+		if err != nil {
+			return err
+		}
+		// Ensure the file is closed when run() exits
+		defer file.Close()
+		
+		// Assign the file to our unified reader
+		reader = file
+	} else {
+		// No filename supplied: fallback to standard input
+		reader = os.Stdin
+	}
+
+	// 3. Execution pipeline (Unified Logic)
+	// Both paths converge here seamlessly without code duplication
+	count, err := countTotalBytes(reader)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
 
-	count, err := countTotalBytes(file)
-	if _, writeErr := fmt.Println(count); writeErr != nil {
-		return writeErr
-	}
-	return err
+	_, writeErr := fmt.Println(count)
+	return writeErr
 }
+
